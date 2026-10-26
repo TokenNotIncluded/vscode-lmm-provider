@@ -2,6 +2,8 @@
 
 <img src="https://raw.githubusercontent.com/TokenNotIncluded/vscode-lmm-provider/main/assets/icon.png" alt="LMM logo" width="128" height="128" />
 
+The icon has an [editable SVG source](assets/icon.svg) with the LMM ribbon and an editor-window mark; [asset provenance](assets/README.md) is included in the package.
+
 > **Preview:** Requires a deployed LMM server with `lmm-vscode` OAuth registration. The extension checks server support before opening the browser; local tests do not establish production account or model access.
 
 Use the models available to your LMM account in the native VS Code Chat model picker. Sign in with your browser; no API key is required.

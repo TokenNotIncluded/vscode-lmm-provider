@@ -91,7 +91,7 @@ export async function streamCompletion(
     "LMM model did not return an event stream.",
   );
   const reader = response.body.getReader(),
-    decoder = new TextDecoder();
+    decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "",
     data: string[] = [],
     eventLength = 0,
@@ -191,16 +191,18 @@ export async function streamCompletion(
       "LMM stream ended before completion; the request was not retried.",
     );
     const ids = new Set<string>();
-    for (const c of calls.values()) {
+    const completed = [...calls.values()].map((c): Extract<StreamPart, { type: "tool" }> => {
       assert(c.id && c.name && !ids.has(c.id));
       ids.add(c.id);
-      emit({
+      return {
         type: "tool",
         id: c.id,
         name: c.name,
         input: record(JSON.parse(c.arguments || "{}")),
-      });
-    }
+      };
+    });
+    signal.throwIfAborted();
+    for (const call of completed) emit(call);
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

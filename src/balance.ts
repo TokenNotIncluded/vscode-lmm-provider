@@ -38,5 +38,7 @@ export function balanceLabel(value: unknown): string {
   return `${format(balance)} USD · ${format(quota)} 平台额度`;
 }
 function format(value: number): string {
-  return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 12 }).format(value);
+  return new Intl.NumberFormat("en-US", {
+    maximumSignificantDigits: Number.isSafeInteger(value) ? 16 : 12,
+  }).format(value);
 }

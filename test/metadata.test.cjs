@@ -100,3 +100,14 @@ test("wallet validates USD basis and never equates credits with dollars", () => 
     assert.throws(() => balanceLabel({ ...wallet(), ...patch }));
   assert.equal(balanceLabel({ ...wallet(), quota: -500000, public_credit_balance: "-500000", balance: -1 }), "-1 USD · -500,000 平台额度");
 });
+test("wallet retains every digit of safe integer credit balances", () => {
+  for (const [quota, formatted] of [
+    [1234567890123, "1,234,567,890,123"],
+    [-1234567890123, "-1,234,567,890,123"],
+    [Number.MAX_SAFE_INTEGER, "9,007,199,254,740,991"],
+    [-Number.MAX_SAFE_INTEGER, "-9,007,199,254,740,991"],
+  ]) {
+    const value = balanceLabel({ ...wallet(), quota, public_credit_balance: String(quota), balance: quota / 500000 });
+    assert.ok(value.endsWith(` USD · ${formatted} 平台额度`), value);
+  }
+});

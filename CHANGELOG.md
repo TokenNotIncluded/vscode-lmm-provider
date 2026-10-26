@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Validate the complete streamed tool batch before reporting tool calls to VS Code. Malformed arguments, duplicate call IDs, unknown tools, and cancellation do not report a partial batch.
+- Reject invalid UTF-8 in model streams instead of silently changing tool arguments.
+- Preserve every digit of safe integer credit balances in the status bar.
+- Add the editable LMM ribbon/editor icon and its asset provenance.
+
 ## 0.1.3
 
 - Preserve independent upstream input limits, exact provider-qualified IDs and model classification in a reproducible, hashed models.dev snapshot. Conflicting bare IDs remain unknown.

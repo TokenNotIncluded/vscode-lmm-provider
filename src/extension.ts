@@ -189,6 +189,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
           : {}),
       };
       try {
+        const completedTools: vscode.LanguageModelToolCallPart[] = [];
         const response = await fetch(`${ISSUER}/v1/chat/completions`, {
           method: "POST",
           redirect: "error",
@@ -212,7 +213,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
                 tools.some((t) => t.name === part.name),
                 "LMM returned an unknown tool.",
               );
-              progress.report(
+              completedTools.push(
                 new vscode.LanguageModelToolCallPart(
                   part.id,
                   part.name,
@@ -223,6 +224,8 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
           },
           cancel.signal,
         );
+        cancel.signal.throwIfAborted();
+        for (const call of completedTools) progress.report(call);
       } finally {
         void this.account.refresh();
       }

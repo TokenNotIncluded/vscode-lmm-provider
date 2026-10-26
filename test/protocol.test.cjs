@@ -249,6 +249,42 @@ test("SSE bounds pending multiline events", async () => {
     /too large/,
   );
 });
+test("an invalid tool batch never reports earlier valid tool calls", async () => {
+  const first = { index: 0, id: "call_good", function: { name: "read", arguments: '{"path":"ok"}' } };
+  for (const second of [
+    { index: 1, id: "call_bad", function: { name: "read", arguments: '{"path":' } },
+    { index: 1, id: "call_good", function: { name: "read", arguments: "{}" } },
+  ]) {
+    const parts = [];
+    const frame = { choices: [{ delta: { tool_calls: [first, second] }, finish_reason: "tool_calls" }] };
+    await assert.rejects(streamCompletion(
+      sse(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`),
+      part => parts.push(part), new AbortController().signal,
+    ));
+    assert.deepEqual(parts, []);
+  }
+});
+test("invalid UTF-8 cannot silently change tool arguments", async () => {
+  const frame = { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_bad", function: { name: "read", arguments: '{"path":"INVALID_BYTE"}' } }] }, finish_reason: "tool_calls" }] };
+  const encoded = Buffer.from(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`);
+  const start = encoded.indexOf("INVALID_BYTE");
+  const bytes = Buffer.concat([encoded.subarray(0, start), Buffer.from([0xff]), encoded.subarray(start + "INVALID_BYTE".length)]);
+  const parts = [];
+  await assert.rejects(streamCompletion(
+    new Response(bytes, { headers: { "content-type": "text/event-stream" } }),
+    part => parts.push(part), new AbortController().signal,
+  ), /encoded data|utf-8/i);
+  assert.deepEqual(parts, []);
+});
+test("cancellation after a text delta prevents buffered tools from being reported", async () => {
+  const controller = new AbortController(), parts = [];
+  const frame = { choices: [{ delta: { content: "Cancel now", tool_calls: [{ index: 0, id: "call_cancelled", function: { name: "read", arguments: "{}" } }] }, finish_reason: "tool_calls" }] };
+  await assert.rejects(streamCompletion(
+    sse(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`, 65536),
+    part => { parts.push(part); controller.abort(); }, controller.signal,
+  ), { name: "AbortError" });
+  assert.deepEqual(parts, [{ type: "text", text: "Cancel now" }]);
+});
 test("callback rejects wrong issuer/state and duplicate parameters before accepting valid response", async () => {
   const callback = await listenCallback(
     ISSUER,

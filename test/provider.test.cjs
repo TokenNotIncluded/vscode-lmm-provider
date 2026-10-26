@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const Module = require("node:module");
 const settings = {};
 class TextPart { constructor(value) { this.value = value; } }
-class ToolCallPart {}
+class ToolCallPart { constructor(callId, name, input) { Object.assign(this, { callId, name, input }); } }
 class ToolResultPart {}
 const vscode = {
   EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
@@ -57,6 +57,39 @@ test("generation revalidates tool permission and budgets instead of trusting sta
     settings.modelLimits = { [entry.id]: { contextWindow: 8192, maxOutputTokens: 1024 } };
     settings.toolModels = [entry.id];
     assert.deepEqual(await provider.provideLanguageModelChatInformation({ silent: true }, token), []);
+  } finally {
+    global.fetch = original;
+    for (const key of Object.keys(settings)) delete settings[key];
+  }
+});
+test("an unknown tool prevents the entire completed tool batch from being reported", async () => {
+  const original = global.fetch;
+  const entry = makeEntry("gpt-4o"), parts = [];
+  let returnedName = "unavailable";
+  const provider = new Provider({ current: async () => ({}), token: async () => ({ access: "private", scope: `group:${group_id}` }) },
+    async () => { throw new Error("must not open login"); }, { refresh: async () => {} });
+  global.fetch = async url => {
+    if (url.endsWith("/catalog")) return new Response(JSON.stringify({ schema_version: 1, resource: RESOURCE, models: [entry] }), { headers: { "content-type": "application/json" } });
+    const frame = { choices: [{ delta: { tool_calls: [
+      { index: 0, id: "call_good", function: { name: "read", arguments: "{}" } },
+      { index: 1, id: "call_second", function: { name: returnedName, arguments: "{}" } },
+    ] }, finish_reason: "tool_calls" }] };
+    return new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  };
+  try {
+    settings.toolModels = [entry.id];
+    const [model] = await provider.provideLanguageModelChatInformation({ silent: true }, token);
+    await assert.rejects(provider.provideLanguageModelChatResponse(model, [message],
+      { tools: [{ name: "read", description: "read", inputSchema: {} }] },
+      { report(part) { parts.push(part); } }, token), /unknown tool/);
+    assert.deepEqual(parts, []);
+    returnedName = "read";
+    await provider.provideLanguageModelChatResponse(model, [message],
+      { tools: [{ name: "read", description: "read", inputSchema: {} }] },
+      { report(part) { parts.push(part); } }, token);
+    assert.deepEqual(parts.map(part => [part.callId, part.name, part.input]), [
+      ["call_good", "read", {}], ["call_second", "read", {}],
+    ]);
   } finally {
     global.fetch = original;
     for (const key of Object.keys(settings)) delete settings[key];
