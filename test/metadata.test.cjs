@@ -1,13 +1,13 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { modelMetadata, referenceMetadata, isTextChatModel, toolCallingEnabled } = require("../dist/metadata");
+const { modelMetadata, referenceMetadata, isTextChatModel, toolCallingEnabled, catalogItem, chatUnsupportedReason } = require("../dist/metadata");
 const { balanceLabel } = require("../dist/balance");
 const { catalogModels } = require("../dist/wire");
 const { RESOURCE } = require("../dist/protocol");
 const entry = (group = "default", model = "gpt-4o", ratio = 0.5) => ({
   id: `lmm:${Buffer.from(group).toString("base64url")}:${Buffer.from(model).toString("base64url")}`,
   group_id: Buffer.from(group).toString("base64url"), group, upstream_model: model, name: model,
-  groupMultiplier: ratio,
+  groupMultiplier: ratio, apis: ["openai-completions"],
 });
 test("known context is model-specific, reserves output, and labels source", () => {
   const info = modelMetadata(entry());
@@ -83,13 +83,30 @@ test("catalog reads per-model effective ratio or legacy group ratio, binds grant
   assert.throws(() => catalogModels({ ...body, groups: [group, group] }, group.scope));
   assert.throws(() => catalogModels(body, "group:other"));
 });
-test("catalog validates all rows before unsupported protocols are filtered", () => {
+test("catalog validates every route and retains unsupported APIs for discovery", () => {
   const e = entry(), group = { id: e.group_id, name: e.group, scope: `group:${e.group_id}`, multiplier: 2 };
   const m = { ...e, apis: ["openai-completions"] };
   const body = { schema_version: 1, resource: RESOURCE, groups: [group], models: [m] };
   for (const invalid of [null, {}, { ...m, apis: [] }, { ...m, apis: [1] }, { ...m, apis: ["anthropic-messages"] }])
-    assert.throws(() => catalogModels({ ...body, models: [m, invalid] }, group.scope));
+    assert.throws(() => catalogModels({ ...body, models: [m, invalid] }, group.scope)); // duplicate IDs also fail
+  const unsupported = { ...entry("default", "messages-only"), apis: ["anthropic-messages"] };
+  const routes = catalogModels({ ...body, models: [m, unsupported] }, group.scope);
+  assert.equal(routes.length, 2);
+  assert.match(catalogItem(routes[1]).detail, /Unsupported Chat API: anthropic-messages/);
+  assert.match(catalogItem(routes[1]).detail, /Limits\/capabilities: unknown/);
+  assert.throws(() => catalogModels({ ...body, models: [unsupported] }, "group:other"));
   assert.throws(() => catalogModels({ ...body, groups: [{ ...group, name: "" }] }, group.scope));
+});
+test("catalog preserves server labels, group identity and explicit limitations", () => {
+  const a = { ...entry("first", "private-alias", null), name: "Reviewed server label" };
+  const b = { ...entry("second", "private-alias", 0), name: a.name };
+  assert.equal(catalogItem(a).label, "first / Reviewed server label");
+  assert.match(catalogItem(a).description, /private-alias · 倍率未知/);
+  assert.match(catalogItem(a).detail, /Limits\/capabilities: unknown/);
+  assert.notEqual(catalogItem(a).label, catalogItem(b).label);
+  assert.match(catalogItem(b).description, /0×/);
+  assert.match(modelMetadata(a).name, /Reviewed server label/);
+  assert.match(chatUnsupportedReason(entry("first", "text-embedding-3-small")), /non-text or non-chat/);
 });
 const wallet = () => ({ schema_version: 2, currency: "USD", quota: 500000, quota_per_unit: 500000, balance: 1, updated_at: 1,
   authorization_limit: null, credit_unit: 1, credits_per_usd: "500000", public_credit_balance: "500000" });

@@ -19,7 +19,7 @@ exports.run = async () => {
     "Stable LanguageModelChatProvider registration succeeds",
   );
   const commands = await vscode.commands.getCommands();
-  for (const id of ["lmm.signIn", "lmm.signOut", "lmm.refreshModels", "lmm.refreshAccount"])
+  for (const id of ["lmm.signIn", "lmm.signOut", "lmm.refreshModels", "lmm.refreshAccount", "lmm.showCatalog"])
     assert.ok(commands.includes(id));
   await vscode.commands.executeCommand("lmm.refreshAccount");
   await vscode.commands.executeCommand("lmm.refreshModels");

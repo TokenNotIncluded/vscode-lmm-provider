@@ -6,6 +6,7 @@ export interface CatalogModel {
   upstream_model: string;
   name: string;
   groupMultiplier: number | null;
+  apis: string[];
 }
 export function catalogModels(body: unknown, scope: string): CatalogModel[] {
   const b = record(body);
@@ -54,7 +55,7 @@ export function catalogModels(body: unknown, scope: string): CatalogModel[] {
       const groupMultiplier = pricing ? multiplier(pricing.group_multiplier) : (groups.get(m.group_id) ?? null);
       seen.add(m.id);
       return {
-        supported: m.apis.includes("openai-completions"),
+        apis: [...m.apis],
         id: m.id,
         group_id: m.group_id,
         group: m.group,
@@ -62,7 +63,7 @@ export function catalogModels(body: unknown, scope: string): CatalogModel[] {
         name: m.name,
         groupMultiplier,
       };
-    }).filter(model => model.supported).map(({ supported: _supported, ...model }) => model);
+    });
 }
 function multiplier(value: unknown): number | null {
   if (value === undefined || value === null) return null;

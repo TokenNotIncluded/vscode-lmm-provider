@@ -7,6 +7,8 @@ class ToolCallPart { constructor(callId, name, input) { Object.assign(this, { ca
 class ToolResultPart {}
 const vscode = {
   EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
+  ProgressLocation: { Notification: 15 },
+  window: {},
   workspace: { getConfiguration: () => ({
     get: (key, fallback) => Object.hasOwn(settings, key) ? settings[key] : fallback,
     inspect: key => ({ globalValue: settings[key] }),
@@ -53,6 +55,10 @@ test("generation revalidates tool permission and budgets instead of trusting sta
     await assert.rejects(provider.provideLanguageModelChatResponse(stale, [message], {}, { report() {} }, token), /current LMM input budget/);
     assert.equal(requests.length, 1);
     delete settings.maxInputTokens;
+    entry = { ...entry, apis: ["anthropic-messages"] };
+    assert.deepEqual(await provider.provideLanguageModelChatInformation({ silent: true }, token), []);
+    await assert.rejects(provider.provideLanguageModelChatResponse(stale, [message], {}, { report() {} }, token), /current API or content/);
+    assert.equal(requests.length, 1);
     entry = makeEntry("text-embedding-3-small");
     settings.modelLimits = { [entry.id]: { contextWindow: 8192, maxOutputTokens: 1024 } };
     settings.toolModels = [entry.id];
@@ -61,6 +67,29 @@ test("generation revalidates tool permission and budgets instead of trusting sta
     global.fetch = original;
     for (const key of Object.keys(settings)) delete settings[key];
   }
+});
+test("authorized directory exposes every route without generating or widening access", async () => {
+  const original = global.fetch;
+  const entries = [makeEntry("gpt-4o"), { ...makeEntry("messages-only"), apis: ["anthropic-messages"] }, makeEntry("text-embedding-3-small")];
+  let items, requests = 0;
+  vscode.window.withProgress = async (_options, run) => run({}, token);
+  vscode.window.showQuickPick = async rows => { items = rows; };
+  vscode.window.showErrorMessage = async message => { throw new Error(message); };
+  const provider = new Provider({ current: async () => ({}), token: async () => ({ access: "private", scope: `group:${group_id}` }) },
+    async () => { throw new Error("must not open login"); }, { refresh: async () => {} });
+  global.fetch = async (url, options) => {
+    assert.ok(url.endsWith("/api/oauth2/catalog"));
+    assert.equal(options.headers.authorization, "Bearer private");
+    requests++;
+    return new Response(JSON.stringify({ schema_version: 1, resource: RESOURCE, models: entries }), { headers: { "content-type": "application/json" } });
+  };
+  try {
+    await provider.showCatalog();
+    assert.equal(requests, 1);
+    assert.equal(items.length, 3);
+    assert.match(items[1].detail, /Unsupported Chat API/);
+    assert.match(items[2].detail, /known non-text or non-chat/);
+  } finally { global.fetch = original; }
 });
 test("an unknown tool prevents the entire completed tool batch from being reported", async () => {
   const original = global.fetch;

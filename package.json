@@ -36,6 +36,10 @@
         "title": "LMM: Sign Out"
       },
       {
+        "command": "lmm.showCatalog",
+        "title": "LMM: Show Authorized Models"
+      },
+      {
         "command": "lmm.refreshModels",
         "title": "LMM: Refresh Models"
       },

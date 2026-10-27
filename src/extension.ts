@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { Auth, jsonRequest } from "./auth";
 import { assert, ISSUER, LmmError, safeError } from "./protocol";
 import { CatalogModel, catalogModels, streamCompletion } from "./wire";
-import { isTextChatModel, modelMetadata, ModelLimitOverride, toolCallingEnabled } from "./metadata";
+import { catalogItem, chatUnsupportedReason, modelMetadata, ModelLimitOverride, toolCallingEnabled } from "./metadata";
 import { AccountStatus } from "./account";
 interface Model extends vscode.LanguageModelChatInformation {
   entry: CatalogModel;
@@ -73,6 +73,32 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
     private readonly signIn: () => Promise<void>,
     private readonly account: AccountStatus,
   ) {}
+  async authorizedCatalog(signal: AbortSignal): Promise<CatalogModel[]> {
+    if (!(await this.auth.current())) await this.signIn();
+    const c = await this.auth.token(signal);
+    return catalogModels(await jsonRequest("/api/oauth2/catalog", {
+      headers: { authorization: `Bearer ${c.access}` }, signal,
+    }), c.scope);
+  }
+  async showCatalog(): Promise<void> {
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Loading LMM authorized models…", cancellable: true }, async (_progress, token) => {
+      const cancel = cancellation(token);
+      try {
+        const models = await this.authorizedCatalog(cancel.signal);
+        if (!models.length) {
+          await vscode.window.showInformationMessage("No models are currently available in your granted LMM groups.");
+          return;
+        }
+        await vscode.window.showQuickPick(models.map(catalogItem), {
+          title: "LMM: Authorized Models",
+          placeHolder: "All authorized routes; unsupported routes show their Chat limitation",
+          matchOnDescription: true, matchOnDetail: true,
+        }, token);
+      } catch (error) {
+        if (!token.isCancellationRequested) await vscode.window.showErrorMessage(safeError(error));
+      } finally { cancel.dispose(); }
+    });
+  }
   async provideLanguageModelChatInformation(
     options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
@@ -97,7 +123,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
       const inputSetting = config.inspect<number>("maxInputTokens");
       const inputCap = inputSetting?.workspaceFolderValue ?? inputSetting?.workspaceValue ?? inputSetting?.globalValue;
       const overrides = config.get<Record<string, ModelLimitOverride>>("modelLimits", {});
-      return models.filter(entry => isTextChatModel(entry.upstream_model)).map((entry) => ({
+      return models.filter(entry => !chatUnsupportedReason(entry)).map((entry) => ({
         entry,
         id: entry.id,
         family: entry.upstream_model,
@@ -148,6 +174,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
         current,
         "This model is no longer in your LMM catalog. Refresh the model list.",
       );
+      assert(!chatUnsupportedReason(current), "This model's current API or content is not supported in VS Code Chat. Refresh the model list.");
       const config = vscode.workspace.getConfiguration("lmm");
       const inputSetting = config.inspect<number>("maxInputTokens");
       const inputCap = inputSetting?.workspaceFolderValue ?? inputSetting?.workspaceValue ?? inputSetting?.globalValue;
@@ -311,6 +338,7 @@ export function activate(context: vscode.ExtensionContext): void {
         provider.changes.fire();
       }
     }),
+    vscode.commands.registerCommand("lmm.showCatalog", () => provider.showCatalog()),
     vscode.commands.registerCommand("lmm.refreshModels", () => {
       provider.changes.fire();
       return account.refresh();

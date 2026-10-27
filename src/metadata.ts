@@ -25,6 +25,21 @@ export function isTextChatModel(id: string): boolean {
   if (nonChatIds.includes(id) || nonChatIds.some(model => snapshot.providers.some(provider => id === `${provider}/${model}`))) return false;
   return candidates(id).every(textChat);
 }
+/** Stable VS Code Chat supports only the transport and content implemented here. */
+export function chatUnsupportedReason(entry: CatalogModel): string | undefined {
+  if (!entry.apis.includes("openai-completions")) return `Unsupported Chat API: ${entry.apis.join(", ")}`;
+  if (!isTextChatModel(entry.upstream_model)) return "Unsupported Chat content: known non-text or non-chat model";
+  return undefined;
+}
+/** Every authorized route is visible, including routes the Chat host cannot use. */
+export function catalogItem(entry: CatalogModel) {
+  const ratio = entry.groupMultiplier === null ? "倍率未知" : `${entry.groupMultiplier}×`;
+  return {
+    label: `${entry.group} / ${entry.name}`,
+    description: `${entry.upstream_model} · ${ratio}`,
+    detail: `${chatUnsupportedReason(entry) ?? "Supported in VS Code Chat (text only; tools require verification)"} · ${referenceMetadata(entry.upstream_model) ? "Limits: upstream reference (not gateway guarantee)" : "Limits/capabilities: unknown"} · Token prices: current LMM server pricing; not supplied here · APIs: ${entry.apis.join(", ")} · ${entry.id}`,
+  };
+}
 /** Disagreeing exact IDs never borrow whichever provider happened to be first. */
 export function referenceMetadata(id: string, models = references): ReferenceModel | undefined {
   const rows = candidates(id, models);
@@ -72,9 +87,9 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
   const ratio = entry.groupMultiplier === null ? "倍率未知" : `${entry.groupMultiplier}×`;
   const capabilities = known ? `Upstream reference: reasoning ${known.reasoning === true ? "yes" : known.reasoning === false ? "no" : "unknown"}; tools ${known.toolCalling === true ? "yes" : known.toolCalling === false ? "no" : "unknown"}. Gateway tools require lmm.toolModels verification.` : "Upstream capabilities unknown. Gateway tools require lmm.toolModels verification.";
   return {
-    name: `${entry.group} / ${entry.upstream_model} · ${ratio}`,
+    name: `${entry.group} / ${entry.name} · ${ratio}`,
     detail: `${entry.group} · ${ratio}`,
-    tooltip: `LMM · ${entry.group} · 分组倍率 ${ratio}\nContext: ${contextWindow.toLocaleString("en-US")} tokens; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\nToken pricing: current LMM server pricing applies; reference catalog prices are not used.\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
+    tooltip: `LMM · ${entry.group} · ${entry.upstream_model} · 分组倍率 ${ratio}\nContext: ${contextWindow.toLocaleString("en-US")} tokens; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\nToken pricing: current LMM server pricing applies; reference catalog prices are not used.\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
     maxInputTokens, maxOutputTokens,
   };
 }
