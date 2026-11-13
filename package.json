@@ -105,13 +105,13 @@
     "test:host": "bash scripts/test-host.sh"
   },
   "overrides": {
-    "@azure/msal-node": "7.1.1"
+    "@azure/msal-node": "7.2.2"
   },
   "devDependencies": {
-    "@types/node": "^22.19.0",
+    "@types/node": "^26.6.6",
     "@types/vscode": "1.104.0",
-    "@vscode/vsce": "4.0.0",
-    "typescript": "^5.9.3"
+    "@vscode/vsce": "4.1.1",
+    "typescript": "^7.0.2"
   },
   "preview": true
 }
