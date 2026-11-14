@@ -1,3 +1,4 @@
+import { parseMetadata, type ServerMetadata } from "./server-metadata";
 import { assert, record, RESOURCE, LmmError } from "./protocol";
 export interface CatalogModel {
   id: string;
@@ -7,6 +8,8 @@ export interface CatalogModel {
   name: string;
   groupMultiplier: number | null;
   apis: string[];
+  metadata?: ServerMetadata;
+  pricing?: Record<string, unknown>;
 }
 export function catalogModels(body: unknown, scope: string): CatalogModel[] {
   const b = record(body);
@@ -62,6 +65,8 @@ export function catalogModels(body: unknown, scope: string): CatalogModel[] {
         upstream_model: m.upstream_model,
         name: m.name,
         groupMultiplier,
+        metadata: parseMetadata(m.metadata),
+        pricing,
       };
     });
 }

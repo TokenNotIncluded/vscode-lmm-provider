@@ -123,7 +123,9 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
       const inputSetting = config.inspect<number>("maxInputTokens");
       const inputCap = inputSetting?.workspaceFolderValue ?? inputSetting?.workspaceValue ?? inputSetting?.globalValue;
       const overrides = config.get<Record<string, ModelLimitOverride>>("modelLimits", {});
-      return models.filter(entry => !chatUnsupportedReason(entry)).map((entry) => ({
+      return models.filter(entry => !chatUnsupportedReason(entry) && (!entry.metadata ||
+        ((entry.metadata.context_window || entry.metadata.max_input_tokens) && entry.metadata.max_output_tokens) ||
+        Object.hasOwn(overrides, entry.id) || Object.hasOwn(overrides, entry.upstream_model))).map((entry) => ({
         entry,
         id: entry.id,
         family: entry.upstream_model,

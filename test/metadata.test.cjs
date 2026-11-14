@@ -128,3 +128,17 @@ test("wallet retains every digit of safe integer credit balances", () => {
     assert.ok(value.endsWith(` USD · ${formatted} 平台额度`), value);
   }
 });
+
+test('server metadata updates unseen model limits and pricing without a bundled entry', () => {
+  const e = {...entry('default','future-private-model'), metadata: {context_window:128000,max_input_tokens:100000,max_output_tokens:16000,
+    input_modalities:['text'],output_modalities:['text'],reasoning:true,tool_call:true,source:'server'},
+    pricing:{currency:'USD',unit:'million_tokens',price_basis:'effective_user_rates',input:1,output:2,cache_read:null,cache_write:null,group_multiplier:2,trust_multiplier:0.5}};
+  const info = modelMetadata(e);
+  assert.equal(info.maxInputTokens, 95904);
+  assert.equal(toolCallingEnabled(e,[]), true);
+  assert.match(info.tooltip,/input 1, output 2, cache read unknown/);
+  assert.match(info.tooltip,/LMM server: server/);
+  assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:64000}}).maxInputTokens,59904);
+  assert.throws(() => modelMetadata({...e,metadata:{...e.metadata,context_window:null,max_input_tokens:null}}));
+  assert.equal(chatUnsupportedReason({...e,metadata:{...e.metadata,output_modalities:['image']}}),'Unsupported Chat content: known non-text or non-chat model');
+});

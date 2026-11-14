@@ -1,5 +1,7 @@
 # LMM for Copilot
 
+Current server metadata behavior: [Dynamic OAuth catalog](DYNAMIC_CATALOG.md). Server metadata takes precedence over the legacy snapshot behavior described below.
+
 <img src="https://raw.githubusercontent.com/TokenNotIncluded/vscode-lmm-provider/main/assets/icon.png" alt="LMM logo" width="128" height="128" />
 
 The icon has an [editable SVG source](assets/icon.svg) with the LMM ribbon and an editor-window mark; [asset provenance](assets/README.md) is included in the package.

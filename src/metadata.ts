@@ -1,3 +1,4 @@
+import { contextBudget, textOutput } from "./server-metadata";
 import snapshot from "./model-limits.json";
 import { assert, record } from "./protocol";
 import type { CatalogModel } from "./wire";
@@ -28,7 +29,7 @@ export function isTextChatModel(id: string): boolean {
 /** Stable VS Code Chat supports only the transport and content implemented here. */
 export function chatUnsupportedReason(entry: CatalogModel): string | undefined {
   if (!entry.apis.includes("openai-completions")) return `Unsupported Chat API: ${entry.apis.join(", ")}`;
-  if (!isTextChatModel(entry.upstream_model)) return "Unsupported Chat content: known non-text or non-chat model";
+  if (entry.metadata ? !textOutput(entry.metadata) : !isTextChatModel(entry.upstream_model)) return "Unsupported Chat content: known non-text or non-chat model";
   return undefined;
 }
 /** Every authorized route is visible, including routes the Chat host cannot use. */
@@ -37,7 +38,7 @@ export function catalogItem(entry: CatalogModel) {
   return {
     label: `${entry.group} / ${entry.name}`,
     description: `${entry.upstream_model} · ${ratio}`,
-    detail: `${chatUnsupportedReason(entry) ?? "Supported in VS Code Chat (text only; tools require verification)"} · ${referenceMetadata(entry.upstream_model) ? "Limits: upstream reference (not gateway guarantee)" : "Limits/capabilities: unknown"} · Token prices: current LMM server pricing; not supplied here · APIs: ${entry.apis.join(", ")} · ${entry.id}`,
+    detail: `${chatUnsupportedReason(entry) ?? "Supported in VS Code Chat (text only; tools require verification)"} · ${entry.metadata ? `Limits/capabilities: LMM server (${entry.metadata.source})` : referenceMetadata(entry.upstream_model) ? "Limits: upstream reference (not gateway guarantee)" : "Limits/capabilities: unknown"} · ${pricingDetails(entry)} · APIs: ${entry.apis.join(", ")} · ${entry.id}`,
   };
 }
 /** Disagreeing exact IDs never borrow whichever provider happened to be first. */
@@ -52,17 +53,18 @@ export function referenceMetadata(id: string, models = references): ReferenceMod
   return row;
 }
 export function toolCallingEnabled(entry: CatalogModel, models: readonly string[]): boolean {
-  return isTextChatModel(entry.upstream_model) && (models.includes(entry.id) || models.includes(entry.upstream_model));
+  return entry.metadata ? textOutput(entry.metadata) && entry.metadata.tool_call === true :
+    isTextChatModel(entry.upstream_model) && (models.includes(entry.id) || models.includes(entry.upstream_model));
 }
 
 /** Exact IDs only: never infer limits from a model's name or billing group. */
 export function modelMetadata(entry: CatalogModel, overrides: Record<string, ModelLimitOverride> = {}, inputCap?: number, outputCap = 4096) {
-  assert(isTextChatModel(entry.upstream_model), "This LMM model is not a supported text chat model.");
+  assert(entry.metadata ? textOutput(entry.metadata) : isTextChatModel(entry.upstream_model), "This LMM model is not a supported text chat model.");
   assert(Number.isSafeInteger(outputCap) && outputCap > 0 && outputCap <= 2000000, "Invalid lmm.maxOutputTokens setting.");
   assert(inputCap === undefined || (Number.isSafeInteger(inputCap) && inputCap > 0 && inputCap <= 2000000), "Invalid lmm.maxInputTokens setting.");
   const override = Object.hasOwn(overrides, entry.id) ? overrides[entry.id] :
     Object.hasOwn(overrides, entry.upstream_model) ? overrides[entry.upstream_model] : undefined;
-  const known = referenceMetadata(entry.upstream_model);
+  const known = entry.metadata ? undefined : referenceMetadata(entry.upstream_model);
   let contextWindow: number, output: number, upstreamInput = Infinity, source: string;
   if (override !== undefined) {
     const value = record(override);
@@ -72,6 +74,14 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
     contextWindow = value.contextWindow;
     output = value.maxOutputTokens;
     source = "user override";
+  } else if (entry.metadata) {
+    const budget = contextBudget(entry.metadata);
+    assert(budget !== undefined && budget > 1 && entry.metadata.max_output_tokens !== null,
+      "LMM server model limits are unknown; configure verified lmm.modelLimits.");
+    contextWindow = budget;
+    output = entry.metadata.max_output_tokens!;
+    upstreamInput = entry.metadata.max_input_tokens ?? Infinity;
+    source = `LMM server: ${entry.metadata.source}`;
   } else if (known) {
     contextWindow = known.context!;
     output = known.output!;
@@ -85,11 +95,19 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
   const maxOutputTokens = Math.min(output, outputCap, contextWindow - 1);
   const maxInputTokens = Math.min(contextWindow - maxOutputTokens, upstreamInput, inputCap ?? Infinity);
   const ratio = entry.groupMultiplier === null ? "倍率未知" : `${entry.groupMultiplier}×`;
-  const capabilities = known ? `Upstream reference: reasoning ${known.reasoning === true ? "yes" : known.reasoning === false ? "no" : "unknown"}; tools ${known.toolCalling === true ? "yes" : known.toolCalling === false ? "no" : "unknown"}. Gateway tools require lmm.toolModels verification.` : "Upstream capabilities unknown. Gateway tools require lmm.toolModels verification.";
+  const capabilities = entry.metadata ? `Server capabilities: reasoning ${entry.metadata.reasoning ?? "unknown"}; tools ${entry.metadata.tool_call ?? "unknown"}.` : known ? `Upstream reference: reasoning ${known.reasoning === true ? "yes" : known.reasoning === false ? "no" : "unknown"}; tools ${known.toolCalling === true ? "yes" : known.toolCalling === false ? "no" : "unknown"}. Gateway tools require lmm.toolModels verification.` : "Upstream capabilities unknown. Gateway tools require lmm.toolModels verification.";
   return {
     name: `${entry.group} / ${entry.name} · ${ratio}`,
     detail: `${entry.group} · ${ratio}`,
-    tooltip: `LMM · ${entry.group} · ${entry.upstream_model} · 分组倍率 ${ratio}\nContext: ${contextWindow.toLocaleString("en-US")} tokens; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\nToken pricing: current LMM server pricing applies; reference catalog prices are not used.\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
+    tooltip: `LMM · ${entry.group} · ${entry.upstream_model} · 分组倍率 ${ratio}\nContext: ${contextWindow.toLocaleString("en-US")} tokens; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\n${pricingDetails(entry)}\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
     maxInputTokens, maxOutputTokens,
   };
+}
+
+/** Server rates already include group/trust multipliers; null remains unknown. */
+export function pricingDetails(entry: CatalogModel): string {
+  const p = entry.pricing;
+  if (!p) return 'Token pricing: unknown';
+  const rate = (key: string) => typeof p[key] === 'number' && Number.isFinite(p[key]) ? String(p[key]) : 'unknown';
+  return `Pricing: ${p.currency ?? 'unknown'}/${p.unit ?? 'unknown'} (${p.price_basis ?? 'unknown'}); input ${rate('input')}, output ${rate('output')}, cache read ${rate('cache_read')}, cache write ${rate('cache_write')}, request ${rate('request')}; group ×${rate('group_multiplier')}, trust ×${rate('trust_multiplier')} (already included)`;
 }
