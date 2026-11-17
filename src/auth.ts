@@ -104,13 +104,16 @@ export async function jsonRequest(
   );
   const reader = response.body.getReader();
   let text = "";
+  let bytes = 0;
+  const isCatalog = path === "/api/oauth2/catalog";
   const decoder = new TextDecoder();
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
+      bytes += value.byteLength;
       text += decoder.decode(value, { stream: true });
-      assert(text.length <= 4000000, "LMM response is too large.");
+      assert(isCatalog ? bytes <= 32 * 1024 * 1024 : text.length <= 4000000, "LMM response is too large.");
     }
   } finally {
     await reader.cancel().catch(() => {});
