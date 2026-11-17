@@ -28,13 +28,13 @@ function textCapable(input: string[] | null | undefined, output: string[] | null
 }
 export function isTextChatModel(id: string, references: ModelsDevCatalog = peekModelsDev()): boolean {
   const row = referenceMetadata(id, references);
-  return !row || textCapable(row.inputModalities, row.outputModalities);
+  return !row || (row.type === "chat" && textCapable(row.inputModalities, row.outputModalities));
 }
 /** Only known transport/content limitations exclude a route; unknown metadata does not. */
 export function chatUnsupportedReason(entry: CatalogModel, references: ModelsDevCatalog = peekModelsDev()): string | undefined {
   if (!entry.apis.includes("openai-completions")) return `Unsupported Chat API: ${entry.apis.join(", ")}`;
   const known = referenceMetadata(entry.upstream_model, references);
-  if (!textCapable(entry.metadata?.input_modalities ?? known?.inputModalities,
+  if ((known && known.type !== "chat") || !textCapable(entry.metadata?.input_modalities ?? known?.inputModalities,
     entry.metadata?.output_modalities ?? known?.outputModalities))
     return "Unsupported Chat content: known non-text or non-chat model";
   return undefined;

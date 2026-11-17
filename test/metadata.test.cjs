@@ -177,3 +177,22 @@ test("known text and audio output remains usable as text chat", () => {
   assert.equal(chatUnsupportedReason(e), undefined);
   assert.equal(toolCallingEnabled(e, []), true);
 });
+
+test("declared non-chat types with text output cannot enter the Chat picker", () => {
+  for (const type of ["embedding", "reranking", "transcription"]) {
+    const catalog = new ModelsDevCatalog({ custom: { id: "custom", models: { future: profile("future", 128000, 4096, { type }) } } });
+    const e = entry("default", "CUSTOM/FUTURE");
+    assert.equal(metadataApi.isTextChatModel(e.upstream_model, catalog), false, type);
+    assert.match(metadataApi.chatUnsupportedReason(e, catalog), /non-text or non-chat/, type);
+    assert.equal(metadataApi.toolCallingEnabled(e, [e.id], catalog), false, type);
+  }
+});
+
+test("public zero limits use documented budgets without losing the authorized route", () => {
+  const catalog = new ModelsDevCatalog({ custom: { id: "custom", models: { future: profile("future", 0, 0) } } });
+  const e = entry("default", "custom/future");
+  const info = metadataApi.modelMetadata(e, {}, undefined, 4096, catalog);
+  assert.equal(info.maxInputTokens, 32768);
+  assert.equal(info.maxOutputTokens, 4096);
+  assert.equal(metadataApi.chatUnsupportedReason(e, catalog), undefined);
+});
