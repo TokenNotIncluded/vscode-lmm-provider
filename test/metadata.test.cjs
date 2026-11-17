@@ -1,6 +1,21 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { modelMetadata, referenceMetadata, isTextChatModel, toolCallingEnabled, catalogItem, chatUnsupportedReason } = require("../dist/metadata");
+const metadataApi = require("../dist/metadata");
+const { catalogItem } = metadataApi;
+const { ModelsDevCatalog } = require("../dist/models-dev-cache");
+const profile = (id, context, output, extra = {}) => ({ id, name: id, limit: { context, output }, modalities: { input: ["text"], output: ["text"] }, reasoning: true, tool_call: true, ...extra });
+const nonChatIds = ["text-embedding-3-large", "text-embedding-3-small", "gemini-embedding-001", "gemini-embedding-2", "gpt-image-2", "dall-e-3", "whisper-1", "tts-1", "rerank-v3.5", "gemini-3-pro-image", "lyria-3-clip-preview", "mistral-embed"];
+const references = new ModelsDevCatalog({ openai: { id: "openai", models: {
+  "gpt-4o": profile("gpt-4o", 128000, 16384),
+  "gpt-5": profile("gpt-5", 400000, 128000, { limit: { context: 400000, input: 272000, output: 128000 } }),
+  "gpt-6.1-sol": profile("gpt-6.1-sol", 1050000, 128000, { limit: { context: 1050000, input: 922000, output: 128000 } }),
+  ...Object.fromEntries(nonChatIds.map(id => [id, profile(id, 8192, 0, { modalities: { input: ["text"], output: ["image"] }, tool_call: false })])),
+} }, anthropic: { id: "anthropic", models: { "claude-sonnet-4-5": profile("claude-sonnet-4-5", 200000, 64000) } } });
+const modelMetadata = (entry, overrides, input, output) => metadataApi.modelMetadata(entry, overrides, input, output, references);
+const referenceMetadata = (id, catalog = references) => metadataApi.referenceMetadata(id, catalog);
+const isTextChatModel = id => metadataApi.isTextChatModel(id, references);
+const toolCallingEnabled = (entry, models) => metadataApi.toolCallingEnabled(entry, models, references);
+const chatUnsupportedReason = entry => metadataApi.chatUnsupportedReason(entry, references);
 const { balanceLabel } = require("../dist/balance");
 const { catalogModels } = require("../dist/wire");
 const { RESOURCE } = require("../dist/protocol");
@@ -13,7 +28,7 @@ test("known context is model-specific, reserves output, and labels source", () =
   const info = modelMetadata(entry());
   assert.equal(info.maxInputTokens, 128000 - 4096);
   assert.equal(info.maxOutputTokens, 4096);
-  assert.match(info.tooltip, /models.dev: openai\/gpt-4o/);
+  assert.match(info.tooltip, /models.dev: https:\/\/models.dev\//);
   assert.match(info.tooltip, /not gateway guarantee/);
   assert.notEqual(modelMetadata(entry("default", "claude-sonnet-4-5")).maxInputTokens, info.maxInputTokens);
 });
@@ -32,7 +47,7 @@ test("exact wire override beats upstream override; caps cannot exceed context", 
   assert.throws(() => modelMetadata(e, {}, undefined, NaN));
 });
 test("unknown aliases use explicitly labeled compatibility estimates", () => {
-  const info = modelMetadata(entry("default", "gpt-4o-custom-route"));
+  const info = modelMetadata(entry("default", "unlisted-private-model"));
   assert.equal(info.maxInputTokens, 32768);
   assert.match(info.tooltip, /unknown model limits; compatibility estimate/);
   assert.match(modelMetadata(entry("default", "__proto__")).tooltip, /unknown/);
@@ -46,8 +61,10 @@ test("independent upstream input limit and provider-qualified exact IDs are hono
   assert.match(modelMetadata(entry("default", "unknown")).tooltip, /capabilities unknown/);
 });
 test("conflicting provider metadata is unknown unless provider is explicit", () => {
-  const first = referenceMetadata("gpt-4o");
-  const models = { duplicate: [{ ...first, source: "one/duplicate" }, { ...first, source: "two/duplicate", context: 4096 }] };
+  const models = new ModelsDevCatalog({
+    one: { id: "one", models: { duplicate: profile("duplicate", 128000, 4096) } },
+    two: { id: "two", models: { duplicate: profile("duplicate", 4096, 1024) } },
+  });
   assert.equal(referenceMetadata("duplicate", models), undefined);
   assert.equal(referenceMetadata("one/duplicate", models).context, 128000);
   assert.equal(referenceMetadata("two/duplicate", models).context, 4096);
@@ -61,7 +78,7 @@ test("known non-chat entries stay excluded despite configuration overrides", () 
   assert.equal(isTextChatModel("my-private-chat-alias"), true);
 });
 test("wire-specific tool verification does not enable another group's route", () => {
-  const a = entry("first"), b = entry("second");
+  const a = entry("first", "unlisted-tool-model"), b = entry("second", "unlisted-tool-model");
   assert.equal(toolCallingEnabled(a, [a.id]), true);
   assert.equal(toolCallingEnabled(b, [a.id]), false);
   assert.equal(toolCallingEnabled(b, [a.upstream_model]), true);
@@ -134,11 +151,29 @@ test('server metadata updates unseen model limits and pricing without a bundled 
     input_modalities:['text'],output_modalities:['text'],reasoning:true,tool_call:true,source:'server'},
     pricing:{currency:'USD',unit:'million_tokens',price_basis:'effective_user_rates',input:1,output:2,cache_read:null,cache_write:null,group_multiplier:2,trust_multiplier:0.5}};
   const info = modelMetadata(e);
-  assert.equal(info.maxInputTokens, 95904);
+  assert.equal(info.maxInputTokens, 100000);
   assert.equal(toolCallingEnabled(e,[]), true);
   assert.match(info.tooltip,/input 1, output 2, cache read unknown/);
   assert.match(info.tooltip,/LMM server: server/);
   assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:64000}}).maxInputTokens,59904);
-  assert.throws(() => modelMetadata({...e,metadata:{...e.metadata,context_window:null,max_input_tokens:null}}));
+  assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:null,max_input_tokens:null}}).maxInputTokens, 32768);
   assert.equal(chatUnsupportedReason({...e,metadata:{...e.metadata,output_modalities:['image']}}),'Unsupported Chat content: known non-text or non-chat model');
+});
+
+
+test("fuzzy cached metadata covers prefixed/punctuated IDs while server fields retain authority", () => {
+  const e = entry("default", "gateway/GPT_4O");
+  assert.equal(modelMetadata(e).maxInputTokens, 128000 - 4096);
+  assert.equal(toolCallingEnabled(e, []), true);
+  const changed = { ...e, metadata: { context_window: 64000, max_input_tokens: null, max_output_tokens: null,
+    input_modalities: null, output_modalities: null, reasoning: null, tool_call: false, source: "server" } };
+  assert.equal(modelMetadata(changed).maxInputTokens, 64000 - 4096);
+  assert.equal(toolCallingEnabled(changed, [changed.id]), false);
+  assert.equal(chatUnsupportedReason(changed), undefined);
+});
+test("known text and audio output remains usable as text chat", () => {
+  const e = { ...entry("default", "multimodal-private"), metadata: { context_window: 32000, max_input_tokens: null, max_output_tokens: null,
+    input_modalities: ["text", "image"], output_modalities: ["text", "audio"], reasoning: false, tool_call: true, source: "server" } };
+  assert.equal(chatUnsupportedReason(e), undefined);
+  assert.equal(toolCallingEnabled(e, []), true);
 });

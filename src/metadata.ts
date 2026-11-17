@@ -1,5 +1,4 @@
-import { contextBudget, textOutput } from "./server-metadata";
-import snapshot from "./model-limits.json";
+import { peekModelsDev, type ModelsDevCatalog } from "./models-dev-cache";
 import { assert, record } from "./protocol";
 import type { CatalogModel } from "./wire";
 
@@ -10,26 +9,34 @@ export interface ReferenceModel {
   inputModalities: string[] | null; outputModalities: string[] | null;
   reasoning: boolean | null; toolCalling: boolean | null;
 }
-const references: Readonly<Record<string, ReferenceModel[]>> = snapshot.models;
-const qualified = new Map(Object.values(references).flatMap(rows => rows.map(row => [row.source, row] as const)));
-const nonChatIds: readonly string[] = snapshot.nonChatIds;
-function candidates(id: string, models = references): ReferenceModel[] {
-  const exact = models === references ? qualified.get(id) : Object.values(models).flat().find(row => row.source === id);
-  return exact ? [exact] : Object.hasOwn(models, id) ? models[id] : [];
+
+/** Public metadata is matched independently of the account's exact route identity. */
+export function referenceMetadata(id: string, references: ModelsDevCatalog = peekModelsDev()): ReferenceModel | undefined {
+  const row = references.resolve(id);
+  if (!row) return undefined;
+  return {
+    source: row.source, type: row.type ?? "chat", family: null,
+    context: row.limit.context > 0 ? row.limit.context : null,
+    input: row.limit.input && row.limit.input > 0 ? row.limit.input : null,
+    output: row.limit.output > 0 ? row.limit.output : null,
+    inputModalities: row.modalities.input, outputModalities: row.modalities.output,
+    reasoning: row.reasoning, toolCalling: row.tool_call,
+  };
 }
-function textChat(row: ReferenceModel): boolean {
-  return row.type === "chat" && !!row.inputModalities?.includes("text") &&
-    row.outputModalities?.length === 1 && row.outputModalities[0] === "text";
+function textCapable(input: string[] | null | undefined, output: string[] | null | undefined): boolean {
+  return (!input || input.includes("text")) && (!output || output.includes("text"));
 }
-/** Keep known non-chat entries excluded even when a user sets a limit or tool override. */
-export function isTextChatModel(id: string): boolean {
-  if (nonChatIds.includes(id) || nonChatIds.some(model => snapshot.providers.some(provider => id === `${provider}/${model}`))) return false;
-  return candidates(id).every(textChat);
+export function isTextChatModel(id: string, references: ModelsDevCatalog = peekModelsDev()): boolean {
+  const row = referenceMetadata(id, references);
+  return !row || textCapable(row.inputModalities, row.outputModalities);
 }
-/** Stable VS Code Chat supports only the transport and content implemented here. */
-export function chatUnsupportedReason(entry: CatalogModel): string | undefined {
+/** Only known transport/content limitations exclude a route; unknown metadata does not. */
+export function chatUnsupportedReason(entry: CatalogModel, references: ModelsDevCatalog = peekModelsDev()): string | undefined {
   if (!entry.apis.includes("openai-completions")) return `Unsupported Chat API: ${entry.apis.join(", ")}`;
-  if (entry.metadata ? !textOutput(entry.metadata) : !isTextChatModel(entry.upstream_model)) return "Unsupported Chat content: known non-text or non-chat model";
+  const known = referenceMetadata(entry.upstream_model, references);
+  if (!textCapable(entry.metadata?.input_modalities ?? known?.inputModalities,
+    entry.metadata?.output_modalities ?? known?.outputModalities))
+    return "Unsupported Chat content: known non-text or non-chat model";
   return undefined;
 }
 /** Every authorized route is visible, including routes the Chat host cannot use. */
@@ -38,33 +45,24 @@ export function catalogItem(entry: CatalogModel) {
   return {
     label: `${entry.group} / ${entry.name}`,
     description: `${entry.upstream_model} · ${ratio}`,
-    detail: `${chatUnsupportedReason(entry) ?? "Supported in VS Code Chat (text only; tools require verification)"} · ${entry.metadata ? `Limits/capabilities: LMM server (${entry.metadata.source})` : referenceMetadata(entry.upstream_model) ? "Limits: upstream reference (not gateway guarantee)" : "Limits/capabilities: unknown"} · ${pricingDetails(entry)} · APIs: ${entry.apis.join(", ")} · ${entry.id}`,
+    detail: `${chatUnsupportedReason(entry) ?? "Supported in VS Code Chat (text input/output)"} · ${entry.metadata ? `Limits/capabilities: LMM server (${entry.metadata.source}); missing fields use models.dev when available` : referenceMetadata(entry.upstream_model) ? "Limits: cached models.dev reference (not gateway guarantee)" : "Limits/capabilities: unknown"} · ${pricingDetails(entry)} · APIs: ${entry.apis.join(", ")} · ${entry.id}`,
   };
 }
-/** Disagreeing exact IDs never borrow whichever provider happened to be first. */
-export function referenceMetadata(id: string, models = references): ReferenceModel | undefined {
-  const rows = candidates(id, models);
-  const profile = ({ source: _source, ...row }: ReferenceModel) => JSON.stringify(row);
-  if (!rows.length || !rows.every(row => textChat(row) && profile(row) === profile(rows[0]))) return undefined;
-  const row = rows[0];
-  if (!Number.isSafeInteger(row.context) || row.context! <= 1 ||
-      !Number.isSafeInteger(row.output) || row.output! <= 0 ||
-      (row.input !== null && (!Number.isSafeInteger(row.input) || row.input <= 0))) return undefined;
-  return row;
-}
-export function toolCallingEnabled(entry: CatalogModel, models: readonly string[]): boolean {
-  return entry.metadata ? textOutput(entry.metadata) && entry.metadata.tool_call === true :
-    isTextChatModel(entry.upstream_model) && (models.includes(entry.id) || models.includes(entry.upstream_model));
+export function toolCallingEnabled(entry: CatalogModel, models: readonly string[], references: ModelsDevCatalog = peekModelsDev()): boolean {
+  if (chatUnsupportedReason(entry, references)) return false;
+  if (entry.metadata?.tool_call !== null && entry.metadata?.tool_call !== undefined) return entry.metadata.tool_call;
+  const known = referenceMetadata(entry.upstream_model, references);
+  return known?.toolCalling === true || models.includes(entry.id) || models.includes(entry.upstream_model);
 }
 
-/** Exact IDs only: never infer limits from a model's name or billing group. */
-export function modelMetadata(entry: CatalogModel, overrides: Record<string, ModelLimitOverride> = {}, inputCap?: number, outputCap = 4096) {
-  assert(entry.metadata ? textOutput(entry.metadata) : isTextChatModel(entry.upstream_model), "This LMM model is not a supported text chat model.");
+/** Server fields take priority; cached fuzzy references fill gaps, then labeled host defaults. */
+export function modelMetadata(entry: CatalogModel, overrides: Record<string, ModelLimitOverride> = {}, inputCap?: number, outputCap = 4096, references: ModelsDevCatalog = peekModelsDev()) {
+  assert(!chatUnsupportedReason(entry, references), "This LMM model is not a supported text chat model.");
   assert(Number.isSafeInteger(outputCap) && outputCap > 0 && outputCap <= 2000000, "Invalid lmm.maxOutputTokens setting.");
   assert(inputCap === undefined || (Number.isSafeInteger(inputCap) && inputCap > 0 && inputCap <= 2000000), "Invalid lmm.maxInputTokens setting.");
   const override = Object.hasOwn(overrides, entry.id) ? overrides[entry.id] :
     Object.hasOwn(overrides, entry.upstream_model) ? overrides[entry.upstream_model] : undefined;
-  const known = entry.metadata ? undefined : referenceMetadata(entry.upstream_model);
+  const known = referenceMetadata(entry.upstream_model, references);
   let contextWindow: number, output: number, upstreamInput = Infinity, source: string;
   if (override !== undefined) {
     const value = record(override);
@@ -74,28 +72,26 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
     contextWindow = value.contextWindow;
     output = value.maxOutputTokens;
     source = "user override";
-  } else if (entry.metadata) {
-    const budget = contextBudget(entry.metadata);
-    assert(budget !== undefined && budget > 1 && entry.metadata.max_output_tokens !== null,
-      "LMM server model limits are unknown; configure verified lmm.modelLimits.");
-    contextWindow = budget;
-    output = entry.metadata.max_output_tokens!;
-    upstreamInput = entry.metadata.max_input_tokens ?? Infinity;
-    source = `LMM server: ${entry.metadata.source}`;
-  } else if (known) {
-    contextWindow = known.context!;
-    output = known.output!;
-    upstreamInput = known.input ?? Infinity;
-    source = `models.dev: ${known.source} (snapshot ${snapshot.retrieved.slice(0, 10)}; upstream reference, not gateway guarantee)`;
   } else {
-    contextWindow = (inputCap ?? 32768) + outputCap;
-    output = outputCap;
-    source = "unknown model limits; compatibility estimate — configure lmm.modelLimits";
+    const context = entry.metadata?.context_window ?? known?.context;
+    const input = entry.metadata?.max_input_tokens ?? known?.input;
+    const declaredOutput = entry.metadata?.max_output_tokens ?? known?.output;
+    upstreamInput = input ?? Infinity;
+    contextWindow = context ?? input ?? ((inputCap ?? 32768) + outputCap);
+    output = declaredOutput ?? outputCap;
+    const sources: string[] = [];
+    if (entry.metadata) sources.push(`LMM server: ${entry.metadata.source}`);
+    if (known) sources.push(`models.dev: ${known.source} (automatically cached; upstream reference, not gateway guarantee)`);
+    if (!context && !input) sources.push("unknown model limits; compatibility estimate — configure lmm.modelLimits");
+    source = sources.join("; ");
   }
   const maxOutputTokens = Math.min(output, outputCap, contextWindow - 1);
   const maxInputTokens = Math.min(contextWindow - maxOutputTokens, upstreamInput, inputCap ?? Infinity);
   const ratio = entry.groupMultiplier === null ? "倍率未知" : `${entry.groupMultiplier}×`;
-  const capabilities = entry.metadata ? `Server capabilities: reasoning ${entry.metadata.reasoning ?? "unknown"}; tools ${entry.metadata.tool_call ?? "unknown"}.` : known ? `Upstream reference: reasoning ${known.reasoning === true ? "yes" : known.reasoning === false ? "no" : "unknown"}; tools ${known.toolCalling === true ? "yes" : known.toolCalling === false ? "no" : "unknown"}. Gateway tools require lmm.toolModels verification.` : "Upstream capabilities unknown. Gateway tools require lmm.toolModels verification.";
+  const reasoning = entry.metadata?.reasoning ?? known?.reasoning;
+  const tools = entry.metadata?.tool_call ?? known?.toolCalling;
+  const flag = (value: boolean | null | undefined) => value === true ? "yes" : value === false ? "no" : "unknown";
+  const capabilities = reasoning === undefined && tools === undefined ? "Upstream capabilities unknown." : `Capabilities: reasoning ${flag(reasoning)}; tools ${flag(tools)}. Server values take priority over public references.`;
   return {
     name: `${entry.group} / ${entry.name} · ${ratio}`,
     detail: `${entry.group} · ${ratio}`,

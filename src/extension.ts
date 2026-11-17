@@ -3,6 +3,7 @@ import { Auth, jsonRequest } from "./auth";
 import { assert, ISSUER, LmmError, safeError } from "./protocol";
 import { CatalogModel, catalogModels, streamCompletion } from "./wire";
 import { catalogItem, chatUnsupportedReason, modelMetadata, ModelLimitOverride, toolCallingEnabled } from "./metadata";
+import { loadModelsDev } from "./models-dev-cache";
 import { AccountStatus } from "./account";
 interface Model extends vscode.LanguageModelChatInformation {
   entry: CatalogModel;
@@ -72,13 +73,15 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
     private readonly auth: Auth,
     private readonly signIn: () => Promise<void>,
     private readonly account: AccountStatus,
+    private readonly refreshMetadata: () => Promise<unknown> = loadModelsDev,
   ) {}
   async authorizedCatalog(signal: AbortSignal): Promise<CatalogModel[]> {
     if (!(await this.auth.current())) await this.signIn();
     const c = await this.auth.token(signal);
-    return catalogModels(await jsonRequest("/api/oauth2/catalog", {
+    const [raw] = await Promise.all([jsonRequest("/api/oauth2/catalog", {
       headers: { authorization: `Bearer ${c.access}` }, signal,
-    }), c.scope);
+    }), this.refreshMetadata()]);
+    return catalogModels(raw, c.scope);
   }
   async showCatalog(): Promise<void> {
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Loading LMM authorized models…", cancellable: true }, async (_progress, token) => {
@@ -110,6 +113,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
         await this.signIn();
       }
       const c = await this.auth.token(cancel.signal);
+      await this.refreshMetadata();
       const models = catalogModels(
         await jsonRequest("/api/oauth2/catalog", {
           headers: { authorization: `Bearer ${c.access}` },
@@ -123,9 +127,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
       const inputSetting = config.inspect<number>("maxInputTokens");
       const inputCap = inputSetting?.workspaceFolderValue ?? inputSetting?.workspaceValue ?? inputSetting?.globalValue;
       const overrides = config.get<Record<string, ModelLimitOverride>>("modelLimits", {});
-      return models.filter(entry => !chatUnsupportedReason(entry) && (!entry.metadata ||
-        ((entry.metadata.context_window || entry.metadata.max_input_tokens) && entry.metadata.max_output_tokens) ||
-        Object.hasOwn(overrides, entry.id) || Object.hasOwn(overrides, entry.upstream_model))).map((entry) => ({
+      return models.filter(entry => !chatUnsupportedReason(entry)).map((entry) => ({
         entry,
         id: entry.id,
         family: entry.upstream_model,
@@ -165,6 +167,7 @@ export class Provider implements vscode.LanguageModelChatProvider<Model> {
     const cancel = cancellation(token, 300000);
     try {
       const credential = await this.auth.token(cancel.signal);
+      await this.refreshMetadata();
       const current = catalogModels(
         await jsonRequest("/api/oauth2/catalog", {
           headers: { authorization: `Bearer ${credential.access}` },

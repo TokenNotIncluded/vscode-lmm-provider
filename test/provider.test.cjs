@@ -26,13 +26,14 @@ const { RESOURCE } = require("../dist/protocol");
 const group_id = Buffer.from("default").toString("base64url");
 const makeEntry = upstream_model => ({ id: `lmm:${group_id}:${Buffer.from(upstream_model).toString("base64url")}`,
   group_id, group: "default", upstream_model, name: upstream_model, apis: ["openai-completions"] });
+const nonChat = { context_window: null, max_input_tokens: 8192, max_output_tokens: null, input_modalities: ["text"], output_modalities: ["embedding"], reasoning: false, tool_call: false, source: "server" };
 const token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
 const message = { role: 1, content: [new TextPart("Hello")], name: undefined };
 test("generation revalidates tool permission and budgets instead of trusting stale picker metadata", async () => {
   const original = global.fetch;
   let entry = makeEntry("gpt-4o"), requests = [];
   const provider = new Provider({ current: async () => ({}), token: async () => ({ access: "private", scope: `group:${group_id}` }) },
-    async () => { throw new Error("must not open login"); }, { refresh: async () => {} });
+    async () => { throw new Error("must not open login"); }, { refresh: async () => {} }, async () => {});
   global.fetch = async (url, options) => {
     if (url.endsWith("/catalog")) return new Response(JSON.stringify({ schema_version: 1, resource: RESOURCE, models: [entry] }), { headers: { "content-type": "application/json" } });
     assert.ok(url.endsWith("/v1/chat/completions"));
@@ -59,7 +60,7 @@ test("generation revalidates tool permission and budgets instead of trusting sta
     assert.deepEqual(await provider.provideLanguageModelChatInformation({ silent: true }, token), []);
     await assert.rejects(provider.provideLanguageModelChatResponse(stale, [message], {}, { report() {} }, token), /current API or content/);
     assert.equal(requests.length, 1);
-    entry = makeEntry("text-embedding-3-small");
+    entry = { ...makeEntry("text-embedding-3-small"), metadata: nonChat };
     settings.modelLimits = { [entry.id]: { contextWindow: 8192, maxOutputTokens: 1024 } };
     settings.toolModels = [entry.id];
     assert.deepEqual(await provider.provideLanguageModelChatInformation({ silent: true }, token), []);
@@ -70,13 +71,13 @@ test("generation revalidates tool permission and budgets instead of trusting sta
 });
 test("authorized directory exposes every route without generating or widening access", async () => {
   const original = global.fetch;
-  const entries = [makeEntry("gpt-4o"), { ...makeEntry("messages-only"), apis: ["anthropic-messages"] }, makeEntry("text-embedding-3-small")];
+  const entries = [makeEntry("gpt-4o"), { ...makeEntry("messages-only"), apis: ["anthropic-messages"] }, { ...makeEntry("text-embedding-3-small"), metadata: nonChat }];
   let items, requests = 0;
   vscode.window.withProgress = async (_options, run) => run({}, token);
   vscode.window.showQuickPick = async rows => { items = rows; };
   vscode.window.showErrorMessage = async message => { throw new Error(message); };
   const provider = new Provider({ current: async () => ({}), token: async () => ({ access: "private", scope: `group:${group_id}` }) },
-    async () => { throw new Error("must not open login"); }, { refresh: async () => {} });
+    async () => { throw new Error("must not open login"); }, { refresh: async () => {} }, async () => {});
   global.fetch = async (url, options) => {
     assert.ok(url.endsWith("/api/oauth2/catalog"));
     assert.equal(options.headers.authorization, "Bearer private");
@@ -96,7 +97,7 @@ test("an unknown tool prevents the entire completed tool batch from being report
   const entry = makeEntry("gpt-4o"), parts = [];
   let returnedName = "unavailable";
   const provider = new Provider({ current: async () => ({}), token: async () => ({ access: "private", scope: `group:${group_id}` }) },
-    async () => { throw new Error("must not open login"); }, { refresh: async () => {} });
+    async () => { throw new Error("must not open login"); }, { refresh: async () => {} }, async () => {});
   global.fetch = async url => {
     if (url.endsWith("/catalog")) return new Response(JSON.stringify({ schema_version: 1, resource: RESOURCE, models: [entry] }), { headers: { "content-type": "application/json" } });
     const frame = { choices: [{ delta: { tool_calls: [

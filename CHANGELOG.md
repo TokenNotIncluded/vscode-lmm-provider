@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
+
+- Replace the bundled model/vendor snapshot with the complete models.dev API and an automatically refreshed local cache.
+- Match model metadata across case, punctuation, provider prefixes and dated aliases without changing account route IDs.
+- Keep compatible authorized models visible when metadata is missing or incomplete, with labeled limit estimates.
+- Respect server capabilities and use public references for missing fields, including automatic tool support.
+- Correct independent input/context budgeting and clear old generated files before packaging.
 
 - Validate the complete streamed tool batch before reporting tool calls to VS Code. Malformed arguments, duplicate call IDs, unknown tools, and cancellation do not report a partial batch.
 - Reject invalid UTF-8 in model streams instead of silently changing tool arguments.
