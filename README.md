@@ -12,7 +12,7 @@ Use the models available to your LMM account in the native VS Code Chat model pi
 
 ## Setup
 
-1. Install **LMM for Copilot** in desktop VS Code 1.104 or newer. Install or enable the VS Code Chat / GitHub Copilot Chat interface if it is not already available.
+1. Download [LMM for Copilot 0.1.5](https://github.com/TokenNotIncluded/vscode-lmm-provider/releases/download/v0.1.5/lmm-copilot-provider-0.1.5.vsix) and use **Extensions: Install from VSIX...** in desktop VS Code 1.104 or newer. Install or enable the VS Code Chat / GitHub Copilot Chat interface if it is not already available.
 2. Run **LMM: Sign In** from the Command Palette. Approve access and select model groups in the LMM browser consent screen.
 3. Open Chat, select **LMM** in the model picker (or **Manage Models**), and choose a group/model. Run **LMM: Refresh Models** after changing access.
 4. Run **LMM: Sign Out** to remove the local credential and revoke the server grant.
@@ -55,15 +55,15 @@ npm run package
 npm run test:host
 ```
 
-`npm test` compiles against the stable VS Code 1.104 API and runs OAuth rotation, cross-window replay, catalog authorization, callback security, SSE, model metadata, and wallet/status race tests. `npm run package` creates `lmm-copilot-provider-0.1.3.vsix`; the extension has no runtime npm dependencies.
+`npm test` compiles against the stable VS Code 1.104 API and runs OAuth rotation, cross-window replay, catalog authorization, callback security, SSE, model metadata, and wallet/status race tests. `npm run package` creates `lmm-copilot-provider-0.1.5.vsix`; the extension has no runtime npm dependencies.
 
-Install the local package with `code --install-extension ./lmm-copilot-provider-0.1.3.vsix`. A real OAuth/model request requires the production server to register public native client `lmm-vscode` with loopback `/oauth/lmm/callback`, the required scopes, and the OAuth relay endpoints.
+Install the local package with `code --install-extension ./lmm-copilot-provider-0.1.5.vsix`. A real OAuth/model request requires the production server to register public native client `lmm-vscode` with loopback `/oauth/lmm/callback`, the required scopes, and the OAuth relay endpoints.
 
-To update the offline reference, download and review `https://models.dev/api.json`, then run `python3 -B scripts/update-model-metadata.py /path/to/api.json --retrieved ISO_UTC_TIMESTAMP --revision REVIEWED_MODELS_DEV_SHA`. The snapshot records the raw response hash and reviewed upstream revision. Run the tests and package checks again; directory capability flags are reference information and do not enable gateway tools.
+Model metadata refreshes automatically from the complete models.dev API when the local cache expires. The default lifetime is 24 hours; set `LMM_MODELS_DEV_TTL_MS` before starting VS Code to change it, or `LMM_MODELS_DEV_CACHE` to choose a cache file. Run **LMM: Refresh Models** to refresh the account directory and check the public cache. If the public directory is unavailable, the last valid cache remains usable; missing metadata does not remove an authorized compatible model.
 
 ## Marketplace publishing
 
-The manifest publisher is `LIghtJUNction`. Publishing requires control of that exact Visual Studio Marketplace publisher and an Azure DevOps Personal Access Token authorized to manage extensions. Run `npx vsce publish --packagePath ./lmm-copilot-provider-0.1.3.vsix` from an authenticated publisher environment. Open VSX additionally requires an Open VSX account, a matching owned namespace, publisher agreement, and its own access token. Never put publishing tokens in repository files.
+The manifest publisher is `LIghtJUNction`. Publishing requires control of that exact Visual Studio Marketplace publisher and an Azure DevOps Personal Access Token authorized to manage extensions. Run `npx vsce publish --packagePath ./lmm-copilot-provider-0.1.5.vsix` from an authenticated publisher environment. Open VSX additionally requires an Open VSX account, a matching owned namespace, publisher agreement, and its own access token. Never put publishing tokens in repository files.
 
 Packaging and automated tests do not establish a successful browser OAuth session, paid model request, or Marketplace listing. Those must be verified separately.
 

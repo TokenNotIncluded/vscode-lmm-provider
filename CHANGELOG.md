@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Document direct installation of the current GitHub release VSIX and the runtime metadata cache settings.
+- Remove obsolete instructions for the deleted static metadata snapshot generator.
+
 ## 0.1.4
 
 - Replace the bundled model/vendor snapshot with the complete models.dev API and an automatically refreshed local cache.
