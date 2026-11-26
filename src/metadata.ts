@@ -64,6 +64,7 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
     Object.hasOwn(overrides, entry.upstream_model) ? overrides[entry.upstream_model] : undefined;
   const known = referenceMetadata(entry.upstream_model, references);
   let contextWindow: number, output: number, upstreamInput = Infinity, source: string;
+  let maximumContext: number | null = null;
   if (override !== undefined) {
     const value = record(override);
     assert(Number.isSafeInteger(value.contextWindow) && value.contextWindow > 1 && value.contextWindow <= 2000000 &&
@@ -77,7 +78,10 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
     const input = entry.metadata?.max_input_tokens ?? known?.input;
     const declaredOutput = entry.metadata?.max_output_tokens ?? known?.output;
     upstreamInput = input ?? Infinity;
-    contextWindow = context ?? input ?? ((inputCap ?? 32768) + outputCap);
+    maximumContext = context ?? input ?? null;
+    contextWindow = maximumContext === null
+      ? (inputCap ?? 32768) + outputCap
+      : Math.max(2, Math.floor(maximumContext / 2));
     output = declaredOutput ?? outputCap;
     const sources: string[] = [];
     if (entry.metadata) sources.push(`LMM server: ${entry.metadata.source}`);
@@ -85,7 +89,7 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
     if (!context && !input) sources.push("unknown model limits; compatibility estimate — configure lmm.modelLimits");
     source = sources.join("; ");
   }
-  const maxOutputTokens = Math.min(output, outputCap, contextWindow - 1);
+  const maxOutputTokens = Math.min(output, outputCap, contextWindow - 1, entry.metadata?.gateway_max_output_tokens ?? Infinity);
   const maxInputTokens = Math.min(contextWindow - maxOutputTokens, upstreamInput, inputCap ?? Infinity);
   const ratio = entry.groupMultiplier === null ? "倍率未知" : `${entry.groupMultiplier}×`;
   const reasoning = entry.metadata?.reasoning ?? known?.reasoning;
@@ -95,7 +99,7 @@ export function modelMetadata(entry: CatalogModel, overrides: Record<string, Mod
   return {
     name: `${entry.group} / ${entry.name} · ${ratio}`,
     detail: `${entry.group} · ${ratio}`,
-    tooltip: `LMM · ${entry.group} · ${entry.upstream_model} · 分组倍率 ${ratio}\nContext: ${contextWindow.toLocaleString("en-US")} tokens; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\n${pricingDetails(entry)}\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
+    tooltip: `LMM · ${entry.group} · ${entry.upstream_model} · 分组倍率 ${ratio}\nContext budget: ${contextWindow.toLocaleString("en-US")} tokens${maximumContext === null ? "" : ` (half of ${maximumContext.toLocaleString("en-US")} maximum)`}; input budget: ${maxInputTokens.toLocaleString("en-US")}; output budget: ${maxOutputTokens.toLocaleString("en-US")}\n${source}\n${capabilities}\n${pricingDetails(entry)}\nInput reserves the configured output budget. Token counting is a conservative UTF-8 byte estimate, not an exact tokenizer. Usage is billed to your LMM wallet.`,
     maxInputTokens, maxOutputTokens,
   };
 }

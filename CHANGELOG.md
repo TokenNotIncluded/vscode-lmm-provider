@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Use half the known context by default and respect the gateway output limit published by the account catalog.
+- Leave model metadata unresolved when a typo matches competing model identities.
+
 ## 0.1.5
 
 - Document direct installation of the current GitHub release VSIX and the runtime metadata cache settings.

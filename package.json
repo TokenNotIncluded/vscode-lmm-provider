@@ -3,7 +3,7 @@
   "displayName": "LMM for Copilot",
   "icon": "assets/icon.png",
   "description": "Use LMM models in VS Code Chat with secure browser OAuth sign-in.",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "publisher": "LIghtJUNction",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -63,7 +63,7 @@
           "default": 32768,
           "minimum": 1024,
           "maximum": 2000000,
-          "description": "Optional input budget cap for all models. LMM server metadata takes priority over automatically cached models.dev metadata matched by normalized model name. Unknown limits use the documented compatibility estimate."
+          "description": "Optional input budget cap for all models. LMM server metadata takes priority over automatically cached models.dev metadata matched by normalized model name. The default working context uses half the known maximum. Unknown limits use the documented compatibility estimate."
         },
         "lmm.maxOutputTokens": {
           "type": "number",
@@ -84,7 +84,7 @@
               "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 2000000 }
             }
           },
-          "description": "Verified model-specific limits keyed by exact authorized LMM wire ID or upstream ID. Wire IDs take priority for group-specific gateway limits; explicit overrides supersede server and cached public metadata."
+          "description": "Verified model-specific limits keyed by exact authorized LMM wire ID or upstream ID. Wire IDs take priority for group-specific gateway limits; explicit context overrides supersede metadata. The server gateway output cap always applies when published."
         },
         "lmm.toolModels": {
           "type": "array",

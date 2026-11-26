@@ -26,7 +26,7 @@ const entry = (group = "default", model = "gpt-4o", ratio = 0.5) => ({
 });
 test("known context is model-specific, reserves output, and labels source", () => {
   const info = modelMetadata(entry());
-  assert.equal(info.maxInputTokens, 128000 - 4096);
+  assert.equal(info.maxInputTokens, 64000 - 4096);
   assert.equal(info.maxOutputTokens, 4096);
   assert.match(info.tooltip, /models.dev: https:\/\/models.dev\//);
   assert.match(info.tooltip, /not gateway guarantee/);
@@ -53,9 +53,9 @@ test("unknown aliases use explicitly labeled compatibility estimates", () => {
   assert.match(modelMetadata(entry("default", "__proto__")).tooltip, /unknown/);
 });
 test("independent upstream input limit and provider-qualified exact IDs are honored", () => {
-  assert.equal(modelMetadata(entry("default", "gpt-5")).maxInputTokens, 272000);
-  assert.equal(modelMetadata(entry("default", "openai/gpt-5")).maxInputTokens, 272000);
-  assert.equal(modelMetadata(entry("default", "gpt-6.1-sol")).maxInputTokens, 922000);
+  assert.equal(modelMetadata(entry("default", "gpt-5")).maxInputTokens, 200000 - 4096);
+  assert.equal(modelMetadata(entry("default", "openai/gpt-5")).maxInputTokens, 200000 - 4096);
+  assert.equal(modelMetadata(entry("default", "gpt-6.1-sol")).maxInputTokens, 525000 - 4096);
   assert.equal(modelMetadata(entry("default", "gpt-5"), {}, 20000).maxInputTokens, 20000);
   assert.match(modelMetadata(entry("default", "gpt-5")).tooltip, /reasoning yes; tools yes/);
   assert.match(modelMetadata(entry("default", "unknown")).tooltip, /capabilities unknown/);
@@ -151,11 +151,11 @@ test('server metadata updates unseen model limits and pricing without a bundled 
     input_modalities:['text'],output_modalities:['text'],reasoning:true,tool_call:true,source:'server'},
     pricing:{currency:'USD',unit:'million_tokens',price_basis:'effective_user_rates',input:1,output:2,cache_read:null,cache_write:null,group_multiplier:2,trust_multiplier:0.5}};
   const info = modelMetadata(e);
-  assert.equal(info.maxInputTokens, 100000);
+  assert.equal(info.maxInputTokens, 64000 - 4096);
   assert.equal(toolCallingEnabled(e,[]), true);
   assert.match(info.tooltip,/input 1, output 2, cache read unknown/);
   assert.match(info.tooltip,/LMM server: server/);
-  assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:64000}}).maxInputTokens,59904);
+  assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:64000}}).maxInputTokens, 32000 - 4096);
   assert.equal(modelMetadata({...e,metadata:{...e.metadata,context_window:null,max_input_tokens:null}}).maxInputTokens, 32768);
   assert.equal(chatUnsupportedReason({...e,metadata:{...e.metadata,output_modalities:['image']}}),'Unsupported Chat content: known non-text or non-chat model');
 });
@@ -163,11 +163,11 @@ test('server metadata updates unseen model limits and pricing without a bundled 
 
 test("fuzzy cached metadata covers prefixed/punctuated IDs while server fields retain authority", () => {
   const e = entry("default", "gateway/GPT_4O");
-  assert.equal(modelMetadata(e).maxInputTokens, 128000 - 4096);
+  assert.equal(modelMetadata(e).maxInputTokens, 64000 - 4096);
   assert.equal(toolCallingEnabled(e, []), true);
   const changed = { ...e, metadata: { context_window: 64000, max_input_tokens: null, max_output_tokens: null,
     input_modalities: null, output_modalities: null, reasoning: null, tool_call: false, source: "server" } };
-  assert.equal(modelMetadata(changed).maxInputTokens, 64000 - 4096);
+  assert.equal(modelMetadata(changed).maxInputTokens, 32000 - 4096);
   assert.equal(toolCallingEnabled(changed, [changed.id]), false);
   assert.equal(chatUnsupportedReason(changed), undefined);
 });
@@ -195,4 +195,29 @@ test("public zero limits use documented budgets without losing the authorized ro
   assert.equal(info.maxInputTokens, 32768);
   assert.equal(info.maxOutputTokens, 4096);
   assert.equal(metadataApi.chatUnsupportedReason(e, catalog), undefined);
+});
+
+test('half context leaves room for output and gateway limits apply to explicit overrides', () => {
+  const e = { ...entry("default", "private-model"), metadata: {
+    context_window: 128001, max_input_tokens: 60000, max_output_tokens: 10000,
+    gateway_max_output_tokens: 2048, source: "server",
+  } };
+  const preferred = modelMetadata(e);
+  assert.equal(preferred.maxInputTokens, 60000);
+  assert.equal(preferred.maxOutputTokens, 2048);
+  assert.match(preferred.tooltip, /half of 128,001 maximum/);
+  const explicit = modelMetadata(e, { [e.id]: { contextWindow: 83000, maxOutputTokens: 4000 } });
+  assert.equal(explicit.maxInputTokens, 83000 - 2048);
+  assert.equal(explicit.maxOutputTokens, 2048);
+});
+
+test("an exact models.dev identity cannot suppress a competing typo match", () => {
+  const directory = new ModelsDevCatalog({
+    first: { models: { "nebula-spark-1": profile("nebula-spark-1", 128000, 8192) } },
+    second: { models: { "nebula-shark-1": profile("nebula-shark-1", 64000, 8192) } },
+    mirror: { models: { "nebula-spark-1": profile("nebula-spark-1", 128000, 8192, { canonical_model_id: "first/nebula-spark-1" }) } },
+  });
+  assert.equal(referenceMetadata("first/nebula-spark-1", directory)?.context, 128000);
+  assert.equal(referenceMetadata("first/nebula-stark-1", directory)?.context, 128000);
+  assert.equal(referenceMetadata("nebula-stark-1", directory), undefined);
 });

@@ -12,7 +12,7 @@ Use the models available to your LMM account in the native VS Code Chat model pi
 
 ## Setup
 
-1. Download [LMM for Copilot 0.1.5](https://github.com/TokenNotIncluded/vscode-lmm-provider/releases/download/v0.1.5/lmm-copilot-provider-0.1.5.vsix) and use **Extensions: Install from VSIX...** in desktop VS Code 1.104 or newer. Install or enable the VS Code Chat / GitHub Copilot Chat interface if it is not already available.
+1. Download [LMM for Copilot 0.1.7](https://github.com/TokenNotIncluded/vscode-lmm-provider/releases/download/v0.1.7/lmm-copilot-provider-0.1.7.vsix) and use **Extensions: Install from VSIX...** in desktop VS Code 1.104 or newer. Install or enable the VS Code Chat / GitHub Copilot Chat interface if it is not already available.
 2. Run **LMM: Sign In** from the Command Palette. Approve access and select model groups in the LMM browser consent screen.
 3. Open Chat, select **LMM** in the model picker (or **Manage Models**), and choose a group/model. Run **LMM: Refresh Models** after changing access.
 4. Run **LMM: Sign Out** to remove the local credential and revoke the server grant.
@@ -31,7 +31,7 @@ The OAuth catalog determines available groups and models. Run **LMM: Show Author
 
 Model names include **group / server model label · group multiplier** so identical models in different groups remain distinguishable. The authorized directory also shows the exact upstream ID. Multipliers come from the authenticated LMM catalog, never from the public model directory; unavailable multipliers are labeled unknown, not zero.
 
-LMM server metadata supplies route-specific limits and capabilities. Missing fields are filled from [models.dev](https://models.dev/api.json?type=all), downloaded automatically and cached locally for 24 hours. The full public directory is searched without a vendor allowlist or bundled model list. Matching tolerates case, punctuation, provider prefixes and dated aliases while leaving ambiguous matches unknown. These are upstream references, not guarantees about an LMM route. Input budgets use the smaller of the declared input maximum and the total context after reserving output. `lmm.maxOutputTokens` defaults to 4,096 and is capped by metadata; an explicit `lmm.maxInputTokens` also caps input. Unknown models remain selectable with a labeled **32,768 input / 4,096 output estimate**. Tooltips identify metadata sources. Token counting remains a conservative UTF-8 byte estimate.
+LMM server metadata supplies route-specific limits and capabilities. Missing fields are filled from [models.dev](https://models.dev/api.json?type=all), downloaded automatically and cached locally for 24 hours. The full public directory is searched without a vendor allowlist or bundled model list. Matching tolerates case, punctuation, provider prefixes and dated aliases while leaving ambiguous matches unknown. These are upstream references, not guarantees about an LMM route. The default working context is half the known maximum, rounded down. The input budget reserves output within that context and respects the declared input maximum. `lmm.maxOutputTokens` defaults to 4,096 and respects model and advertised gateway limits. An explicit `lmm.maxInputTokens` can lower the input budget. Unknown models remain selectable with a labeled **32,768 input / 4,096 output estimate**. Tooltips identify metadata sources. Token counting remains a conservative UTF-8 byte estimate.
 
 For verified gateway limits, set `lmm.modelLimits` in VS Code settings. Keys are exact upstream IDs or canonical `lmm:group_id:model_id` wire IDs; a wire ID overrides the upstream ID for group-specific limits. Example:
 
@@ -55,15 +55,15 @@ npm run package
 npm run test:host
 ```
 
-`npm test` compiles against the stable VS Code 1.104 API and runs OAuth rotation, cross-window replay, catalog authorization, callback security, SSE, model metadata, and wallet/status race tests. `npm run package` creates `lmm-copilot-provider-0.1.5.vsix`; the extension has no runtime npm dependencies.
+`npm test` compiles against the stable VS Code 1.104 API and runs OAuth rotation, cross-window replay, catalog authorization, callback security, SSE, model metadata, and wallet/status race tests. `npm run package` creates `lmm-copilot-provider-0.1.7.vsix`; the extension has no runtime npm dependencies.
 
-Install the local package with `code --install-extension ./lmm-copilot-provider-0.1.5.vsix`. A real OAuth/model request requires the production server to register public native client `lmm-vscode` with loopback `/oauth/lmm/callback`, the required scopes, and the OAuth relay endpoints.
+Install the local package with `code --install-extension ./lmm-copilot-provider-0.1.7.vsix`. A real OAuth/model request requires the production server to register public native client `lmm-vscode` with loopback `/oauth/lmm/callback`, the required scopes, and the OAuth relay endpoints.
 
 Model metadata refreshes automatically from the complete models.dev API when the local cache expires. The default lifetime is 24 hours; set `LMM_MODELS_DEV_TTL_MS` before starting VS Code to change it, or `LMM_MODELS_DEV_CACHE` to choose a cache file. Run **LMM: Refresh Models** to refresh the account directory and check the public cache. If the public directory is unavailable, the last valid cache remains usable; missing metadata does not remove an authorized compatible model.
 
 ## Marketplace publishing
 
-The manifest publisher is `LIghtJUNction`. Publishing requires control of that exact Visual Studio Marketplace publisher and an Azure DevOps Personal Access Token authorized to manage extensions. Run `npx vsce publish --packagePath ./lmm-copilot-provider-0.1.5.vsix` from an authenticated publisher environment. Open VSX additionally requires an Open VSX account, a matching owned namespace, publisher agreement, and its own access token. Never put publishing tokens in repository files.
+The manifest publisher is `LIghtJUNction`. Publishing requires control of that exact Visual Studio Marketplace publisher and an Azure DevOps Personal Access Token authorized to manage extensions. Run `npx vsce publish --packagePath ./lmm-copilot-provider-0.1.7.vsix` from an authenticated publisher environment. Open VSX additionally requires an Open VSX account, a matching owned namespace, publisher agreement, and its own access token. Never put publishing tokens in repository files.
 
 Packaging and automated tests do not establish a successful browser OAuth session, paid model request, or Marketplace listing. Those must be verified separately.
 

@@ -49,9 +49,10 @@ test("generation revalidates tool permission and budgets instead of trusting sta
     assert.equal(requests.length, 0);
     const [refreshed] = await provider.provideLanguageModelChatInformation({ silent: true }, token);
     assert.equal(refreshed.capabilities.toolCalling, false);
-    settings.maxOutputTokens = 1;
+    settings.maxOutputTokens = 4096;
+    entry = { ...entry, metadata: { source: "server", gateway_max_output_tokens: 2048 } };
     await provider.provideLanguageModelChatResponse(stale, [message], {}, { report() {} }, token);
-    assert.equal(requests[0].max_tokens, 1);
+    assert.equal(requests[0].max_tokens, 2048);
     settings.maxInputTokens = 1;
     await assert.rejects(provider.provideLanguageModelChatResponse(stale, [message], {}, { report() {} }, token), /current LMM input budget/);
     assert.equal(requests.length, 1);
